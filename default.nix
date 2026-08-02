@@ -3,7 +3,7 @@
 }:
 
 pkgs.rustPlatform.buildRustPackage {
-  name = "rime.nvim";
+  name = "rime-cli";
 
   src = pkgs.lib.cleanSource ./.;
 

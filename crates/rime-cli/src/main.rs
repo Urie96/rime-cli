@@ -1,8 +1,8 @@
 //! rime-cli: 终端版 Rime 输入法客户端——键盘 → tmux pane 转发器。
 //!
-//! 启动时自动连接常驻的 rime-daemon（未运行则自动拉起，参数见
-//! `RIME_SOCKET` / `RIME_SHARED_DATA_DIR` / `RIME_USER_DATA_DIR` /
-//! `RIME_LOG_DIR` / `RIME_DAEMON_BIN`）。
+//! 启动时自动连接常驻的 rime-daemon（未运行则自动拉起；可执行文件用
+//! `RIME_DAEMON_BIN` 指定，其余配置由 rime-daemon 启动时自行解析，
+//! 不设置任何环境变量）。
 //!
 //! 转发目标二选一：
 //!   - stdout（默认）：上屏中文与未消费按键的原始字节写入 stdout；
@@ -14,7 +14,7 @@
 //!   第 1 行：preedit（拼音串，`|` 为光标）
 //!   第 2 行：候选词（数字选字、翻页等）
 //!
-//! 退出：`Ctrl-\`（不转发）；外部 SIGTERM/SIGINT 亦可。
+//! 退出：`Ctrl-C`（不转发）；外部 SIGTERM/SIGINT 亦可。
 
 mod client;
 mod sys;
@@ -144,7 +144,7 @@ fn print_usage() {
     eprintln!("                   也可用环境变量 RIME_EXEC 指定");
     eprintln!("  -h, --help      显示本帮助");
     eprintln!();
-    eprintln!("退出: Ctrl-\\（不转发）；界面（preedit/候选）画在 stderr。");
+    eprintln!("退出: Ctrl-C（不转发）；界面（preedit/候选）画在 stderr。");
 }
 
 /// 解析命令行参数，返回 --exec 模板（未指定时回退到 RIME_EXEC）。

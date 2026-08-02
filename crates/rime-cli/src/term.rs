@@ -61,7 +61,7 @@ pub enum Key {
     Code(i32, i32),
     /// 无法解码的序列（如 Ctrl+方向键 `\x1b[1;5A`）：不送 rime，原样转发。
     Raw(Vec<u8>),
-    /// Ctrl-\：退出（不转发）。
+    /// Ctrl-C：退出（不转发）。
     Quit,
 }
 
@@ -168,7 +168,7 @@ pub fn read_key() -> io::Result<Option<KeyEvent>> {
     };
     let mut raw = vec![first];
     let key = match first {
-        0x1c => Key::Quit,                  // Ctrl-\：退出（不转发）
+        0x03 => Key::Quit,                  // Ctrl-C：退出（不转发）
         0x00 => Key::Code(0x20, MOD_CTRL),  // Ctrl-Space（中英切换，交给 rime）
         0x09 => Key::Code(KEY_TAB, 0),
         0x0d | 0x0a => Key::Code(KEY_RETURN, 0),

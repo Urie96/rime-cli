@@ -91,7 +91,7 @@ just run
 # 终端 1：前台运行 daemon（Ctrl-C 退出）
 just server
 
-# 终端 2：连接 daemon，进入输入模式（Ctrl-\ 退出）
+# 终端 2：连接 daemon，进入输入模式（Ctrl-C 退出）
 just cli
 ```
 
@@ -119,7 +119,7 @@ rime-cli [--exec <命令模板>]
 | `↑` / `↓` | 映射为 PageUp / PageDown 翻候选页；无候选时原样透传 |
 | `Enter` | 有 preedit 且 librime 未消费时，按输入法惯例本地上屏 |
 | `Ctrl-Space` | 中英切换（交给 librime） |
-| `Ctrl-\` | 退出（不转发） |
+| `Ctrl-C` | 退出（不转发） |
 | 其他组合键 / 未识别序列 | librime 未消费则按原始字节透传 |
 
 界面（2 行，画在 stderr）：第 1 行 preedit（`|` 为光标，空闲时显示方案名），
@@ -127,12 +127,13 @@ rime-cli [--exec <命令模板>]
 
 ## 环境变量
 
-`rime-daemon` 与 `rime-cli` 共用同一套解析规则（`RIME_SOCKET` → `$XDG_RUNTIME_DIR`
-→ 默认路径），客户端未指定时还额外检查 `~/.config/rime`：
+配置完全由 `rime-daemon` 在启动时解析（继承启动者的环境变量）；`rime-cli`
+拉起 daemon 时**不设置任何环境变量**，仅用 `RIME_DAEMON_BIN` 指定可执行文件
+路径，因此通过 rime-cli 拉起的 daemon 与直接启动配置完全一致。解析规则：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `RIME_SHARED_DATA_DIR` | `~/.local/share/rime` | 共享数据目录（词库、schemas），`just server` 下指向仓库内 `rime-ice` |
+| `RIME_SHARED_DATA_DIR` | `~/.config/rime`（若存在）否则 `~/.local/share/rime` | 共享数据目录（词库、schemas），`just server` 下指向仓库内 `rime-ice` |
 | `RIME_USER_DATA_DIR` | `~/.local/share/rime.nvim` | 用户数据目录（`build/` 部署产物、用户词典） |
 | `RIME_LOG_DIR` | `~/.local/state/rime.nvim` | 日志目录（`rime-daemon.log`） |
 | `RIME_SOCKET` | `$XDG_RUNTIME_DIR/rime-daemon.sock`，否则日志目录下 | daemon 的 unix socket 路径 |

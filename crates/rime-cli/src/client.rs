@@ -27,10 +27,6 @@ fn expand(p: &str) -> PathBuf {
     }
 }
 
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_string())
-}
-
 /// Resolve the daemon socket path (same precedence as the daemon itself).
 pub fn default_socket_path() -> PathBuf {
     if let Ok(p) = std::env::var("RIME_SOCKET") {
@@ -137,7 +133,8 @@ impl Client {
 
 // ---------------------------------------------------------------------------
 // Auto-connect: connect to a resident daemon; if none is running, spawn one
-// (detached, same defaults as rime-daemon) and retry until the socket appears.
+// (detached, inheriting our environment; config is resolved by the daemon
+// itself) and retry until the socket appears.
 // ---------------------------------------------------------------------------
 
 fn find_daemon_bin() -> Option<PathBuf> {
@@ -168,22 +165,7 @@ fn find_daemon_bin() -> Option<PathBuf> {
     None
 }
 
-/// Shared data dir used when *we* have to spawn the daemon: honor
-/// `RIME_SHARED_DATA_DIR`, else the common standalone location
-/// `~/.config/rime` (same default the rime.nvim README uses), else the
-/// daemon's own default `~/.local/share/rime`.
-fn preferred_shared_data_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("RIME_SHARED_DATA_DIR") {
-        return expand(&p);
-    }
-    let config = expand("~/.config/rime");
-    if config.is_dir() {
-        return config;
-    }
-    expand("~/.local/share/rime")
-}
-
-fn spawn_daemon(sock: &Path) -> Result<(), String> {
+fn spawn_daemon() -> Result<(), String> {
     let bin = find_daemon_bin().ok_or_else(|| {
         "未找到 rime-daemon 可执行文件（可用 RIME_DAEMON_BIN 指定）。\
          \n请先启动 Neovim + rime.nvim，或手动运行 rime-daemon。"
@@ -193,17 +175,10 @@ fn spawn_daemon(sock: &Path) -> Result<(), String> {
     let mut cmd = Command::new(&bin);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .env("RIME_SOCKET", sock)
-        .env("RIME_SHARED_DATA_DIR", preferred_shared_data_dir())
-        .env(
-            "RIME_USER_DATA_DIR",
-            expand(&env_or("RIME_USER_DATA_DIR", "~/.local/share/rime.nvim")),
-        )
-        .env(
-            "RIME_LOG_DIR",
-            expand(&env_or("RIME_LOG_DIR", "~/.local/state/rime.nvim")),
-        );
+        .stderr(Stdio::null());
+    // 不设置任何 RIME_* 环境变量：配置全部由 rime-daemon 自身解析
+    // （继承调用者的环境变量，如 RIME_SOCKET / RIME_SHARED_DATA_DIR 等），
+    // 与直接启动 rime-daemon 时的解析逻辑完全一致。
     // Detach into a new session so the daemon outlives this client.
     unsafe {
         use std::os::unix::process::CommandExt;
@@ -224,7 +199,7 @@ pub fn connect_or_spawn(sock: &Path) -> Result<Client, String> {
     if let Ok(c) = Client::connect(sock) {
         return Ok(c);
     }
-    spawn_daemon(sock)?;
+    spawn_daemon()?;
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_err = String::new();

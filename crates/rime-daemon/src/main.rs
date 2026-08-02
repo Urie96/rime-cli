@@ -8,6 +8,8 @@
 //! * Data directories (shared/user/log) are configured once at startup via
 //!   environment variables (RIME_SHARED_DATA_DIR / RIME_USER_DATA_DIR /
 //!   RIME_LOG_DIR / RIME_SOCKET) and cannot be changed at runtime.
+//!   RIME_SHARED_DATA_DIR 未设置时优先使用 `~/.config/rime`（若存在），
+//!   否则回退 `~/.local/share/rime`——与 rime-cli 之前的拉起逻辑一致。
 //! * Runs an automatic deployment at startup (full build when `build/` has no
 //!   `.bin` artifacts, incremental check otherwise) on a background thread;
 //!   clients connecting later never trigger deployment themselves.
@@ -95,6 +97,16 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
+/// RIME_SHARED_DATA_DIR 未设置时的解析：优先 `~/.config/rime`（Rime 的
+/// 常见独立安装位置），否则回退到 librime 的默认共享目录。
+fn preferred_shared_data_dir() -> PathBuf {
+    let config = expand("~/.config/rime");
+    if config.is_dir() {
+        return config;
+    }
+    expand("~/.local/share/rime")
+}
+
 impl Config {
     fn from_env() -> Config {
         let log_dir = expand(&env_or("RIME_LOG_DIR", "~/.local/state/rime.nvim"));
@@ -105,8 +117,12 @@ impl Config {
                 .map(|d| PathBuf::from(d).join("rime-daemon.sock"))
                 .unwrap_or_else(|_| log_dir.join("rime-daemon.sock"))
         });
+        let shared_data_dir = match std::env::var("RIME_SHARED_DATA_DIR") {
+            Ok(p) => expand(&p),
+            Err(_) => preferred_shared_data_dir(),
+        };
         Config {
-            shared_data_dir: expand(&env_or("RIME_SHARED_DATA_DIR", "~/.local/share/rime")),
+            shared_data_dir,
             user_data_dir: expand(&env_or("RIME_USER_DATA_DIR", "~/.local/share/rime.nvim")),
             log_dir,
             socket,
