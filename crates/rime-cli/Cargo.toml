@@ -1,0 +1,9 @@
+[package]
+name = "rime-cli"
+version.workspace = true
+edition.workspace = true
+description = "Terminal client for rime-daemon: 3-line IME display (committed / preedit / candidates)"
+
+[dependencies]
+serde_json = "1"
+shlex = "1"

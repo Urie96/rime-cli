@@ -1,0 +1,9 @@
+[package]
+name = "rime-daemon"
+version.workspace = true
+edition.workspace = true
+description = "Standalone librime daemon speaking newline-delimited JSON-RPC over a unix socket"
+
+[dependencies]
+rime-sys = { path = "../rime-sys" }
+serde_json = "1"
