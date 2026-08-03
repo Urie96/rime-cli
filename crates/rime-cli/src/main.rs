@@ -11,7 +11,7 @@
 //!     例：`rime-cli --exec 'tmux send-keys -t %1 -l {}'`。
 //!
 //! 界面（2 行，画在 stderr）：
-//!   第 1 行：preedit（拼音串，`|` 为光标）
+//!   第 1 行：preedit（拼音串，光标为终端竖线光标）
 //!   第 2 行：候选词（数字选字、翻页等）
 //!
 //! 退出：`Ctrl-C`（不转发）；外部 SIGTERM/SIGINT 亦可。
@@ -239,8 +239,8 @@ fn main() {
         handle_event(&mut c, &mut st, &sink, ev);
     }
 
-    // 退出：恢复终端（Drop 还原 termios）
-    let _ = tui.write_all(b"\x1b[0m\r\n");
+    // 退出：恢复终端（Drop 还原 termios），并恢复光标可见与默认形状
+    let _ = tui.write_all(b"\x1b[0m\x1b[?25h\x1b[0 q\r\n");
     let _ = tui.flush();
 }
 

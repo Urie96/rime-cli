@@ -1,6 +1,6 @@
 //! 2-line display state + ANSI rendering.
 //!
-//! Line 1: preedit（带光标）
+//! Line 1: preedit（光标用终端真实光标表示，见 render 末尾）
 //! Line 2: 候选词（带序号与注释）
 //!
 //! 已上屏文本不再由 CLI 维护：rime 的上屏文本与未被消费的按键都实时转发到
@@ -71,7 +71,50 @@ impl State {
     }
 }
 
+/// 单个字符在终端中的显示宽度：0（零宽/组合）、1、2（CJK/全角）。
+fn char_width(c: char) -> usize {
+    let cp = c as u32;
+    // 零宽字符（组合音标、变体选择符等）
+    if (0x0300..=0x036f).contains(&cp)
+        || (0x1ab0..=0x1aff).contains(&cp)
+        || (0x1dc0..=0x1dff).contains(&cp)
+        || (0x20d0..=0x20ff).contains(&cp)
+        || (0xfe00..=0xfe0f).contains(&cp)
+        || (0xfe20..=0xfe2f).contains(&cp)
+    {
+        return 0;
+    }
+    // 宽字符（CJK / 全角 / 谚文 / 表意文字 / emoji）
+    if (0x1100..=0x115f).contains(&cp) // 谚文 Jamo
+        || (0x2e80..=0x303e).contains(&cp) // CJK 部首/康熙/符号
+        || (0x3041..=0x33ff).contains(&cp) // 假名 / CJK 兼容
+        || (0x3400..=0x4dbf).contains(&cp) // CJK 扩展 A
+        || (0x4e00..=0x9fff).contains(&cp) // CJK 统一表意
+        || (0xa000..=0xa4cf).contains(&cp) // 彝文
+        || (0xa960..=0xa97f).contains(&cp) // 谚文 Jamo 扩展 A
+        || (0xac00..=0xd7a3).contains(&cp) // 谚文音节
+        || (0xf900..=0xfaff).contains(&cp) // CJK 兼容表意
+        || (0xfe30..=0xfe4f).contains(&cp) // CJK 兼容形式
+        || (0xff00..=0xff60).contains(&cp) // 全角形式
+        || (0xffe0..=0xffe6).contains(&cp) // 全角符号
+        || (0x1f300..=0x1faff).contains(&cp) // emoji（终端通常按双宽）
+        || (0x20000..=0x2fffd).contains(&cp) // CJK 扩展 B–F
+        || (0x30000..=0x3fffd).contains(&cp) // CJK 扩展 G+（含 U+3FFFD 未分配区，无妨）
+    {
+        2
+    } else {
+        1
+    }
+}
+
+/// preedit 前 n 个字符在终端中的显示宽度（列偏移用）。
+fn display_width(s: &str, n: usize) -> usize {
+    s.chars().take(n).map(char_width).sum()
+}
+
 /// Render the 2-line frame (full clear + home + 2 lines).
+/// 光标不再手画 `|`：有 preedit 时把终端真实光标移到 preedit 光标处并以
+/// 竖线（DECSCUSR bar）显示；空闲时隐藏光标。
 pub fn render(s: &State) -> String {
     let mut out = String::new();
     out.push_str("\x1b[2J\x1b[H");
@@ -88,13 +131,8 @@ pub fn render(s: &State) -> String {
             _ => out.push_str("\x1b[90m…\x1b[0m"),
         }
     } else {
-        let before: String = s.preedit.chars().take(s.cursor).collect();
-        let after: String = s.preedit.chars().skip(s.cursor).collect();
         out.push_str("\x1b[36m");
-        out.push_str(&before);
-        out.push_str("\x1b[33;1m|");
-        out.push_str("\x1b[36m");
-        out.push_str(&after);
+        out.push_str(&s.preedit);
         out.push_str("\x1b[0m");
     }
     out.push_str("\r\n");
@@ -129,5 +167,14 @@ pub fn render(s: &State) -> String {
         out.push_str("\x1b[90m …\x1b[0m");
     }
     out.push_str("\x1b[0m");
+
+    // 光标：有 preedit 时移到第 1 行 preedit 光标处（列 = 前部显示宽度 + 1），
+    // 并设为竖线光标（`\x1b[5 q` = 闪烁竖线，同 vim 插入态）；空闲时隐藏。
+    if !s.preedit.is_empty() {
+        let col = 1 + display_width(&s.preedit, s.cursor);
+        out.push_str(&format!("\x1b[1;{col}H\x1b[?25h\x1b[5 q"));
+    } else {
+        out.push_str("\x1b[?25l");
+    }
     out
 }
