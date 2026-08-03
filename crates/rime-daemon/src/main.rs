@@ -250,7 +250,8 @@ fn schema_list(api: &'static RimeApi) -> Result<Value, String> {
 }
 
 fn current_schema(api: &'static RimeApi, session: RimeSessionId) -> Result<Value, String> {
-    let mut buf = [0i8; 1024];
+    // c_char: macOS/Linux 上是 i8，Android 上是 u8（Rust 1.64 起）
+    let mut buf = [0 as std::ffi::c_char; 1024];
     if unsafe {
         api.get_current_schema.expect("get_current_schema")(
             session,

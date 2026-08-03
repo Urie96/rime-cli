@@ -43,6 +43,21 @@ pub struct Termios {
     pub c_ospeed: u32,
 }
 
+// Android (bionic) 使用内核布局的 `struct termios`：NCCS=19，且没有
+// c_ispeed/c_ospeed 尾随字段（glibc 才有）。tcgetattr/tcsetattr 只读写
+// 前 36 字节，其余标志常量与 Linux 模块的值一致（见下方 consts）。
+#[cfg(target_os = "android")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Termios {
+    pub c_iflag: u32,
+    pub c_oflag: u32,
+    pub c_cflag: u32,
+    pub c_lflag: u32,
+    pub c_line: u8,
+    pub c_cc: [u8; 19],
+}
+
 #[cfg(target_os = "macos")]
 pub mod consts {
     pub const TCSANOW: i32 = 0;
@@ -68,7 +83,7 @@ pub mod consts {
     pub const POLLIN: i16 = 0x0001;
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod consts {
     pub const TCSANOW: i32 = 0;
     pub const VMIN: usize = 6;
