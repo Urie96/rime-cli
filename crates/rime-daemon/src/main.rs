@@ -10,8 +10,9 @@
 //!   RIME_LOG_DIR / RIME_SOCKET) and cannot be changed at runtime.
 //!   RIME_SHARED_DATA_DIR 未设置时优先使用 `~/.config/rime`（若存在），
 //!   否则回退 `~/.local/share/rime`——与 rime-cli 之前的拉起逻辑一致。
-//! * Runs an automatic deployment at startup (full build when `build/` has no
-//!   `.bin` artifacts, incremental check otherwise) on a background thread;
+//! * Runs an automatic maintenance at startup on a background thread:
+//!   deploy first (full build when `build/` has no `.bin` artifacts,
+//!   incremental check otherwise), then a user data sync (`sync_user_data`);
 //!   clients connecting later never trigger deployment themselves.
 //! * Runs until SIGTERM/SIGINT — it is a resident daemon, not tied to any
 //!   client's lifetime.
@@ -45,10 +46,11 @@ static RIME_LOCK: Mutex<()> = Mutex::new(());
 /// Set by the SIGTERM/SIGINT handler; the accept loop polls it to exit.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-/// True while the startup auto-deployment is running (including librime's
-/// synchronous preparation phase, during which `is_maintenance_mode` may
-/// already report false). `maintenance_mode` RPC merges this flag.
-static AUTO_DEPLOYING: AtomicBool = AtomicBool::new(false);
+/// True while the startup maintenance (auto deploy + sync) is running,
+/// including librime's synchronous preparation phase, during which
+/// `is_maintenance_mode` may already report false. `maintenance_mode` RPC
+/// merges this flag.
+static STARTUP_MAINTENANCE: AtomicBool = AtomicBool::new(false);
 
 /// Ping timeout when checking for an existing daemon.
 const PING_TIMEOUT: Duration = Duration::from_millis(300);
@@ -203,6 +205,9 @@ fn check_api(api: &'static RimeApi) {
         api.start_maintenance.is_some(),
         api.is_maintenance_mode.is_some(),
         api.join_maintenance_thread.is_some(),
+        api.sync_user_data.is_some(),
+        api.find_session.is_some(),
+        api.get_user_data_sync_dir.is_some(),
         api.create_session.is_some(),
         api.destroy_session.is_some(),
         api.process_key.is_some(),
@@ -330,8 +335,15 @@ fn dispatch(line: &str, session: &mut RimeSessionId, api: &'static RimeApi) -> S
     // 懒创建 session：部署（maintenance_*）必须在任何引擎启动之前完成，
     // 否则引擎会加载还不存在的 build/ 配置并缓存空结果，导致后续部署失败。
     // 插件流程是 先 deploy 再输入，因此第一个 session_* 请求才建 session。
-    if method.starts_with("session_") && *session == 0 {
-        *session = unsafe { api.create_session.expect("create_session")() };
+    // find_session 兜底：启动同步 sync_user_data 内部会 CleanupAllSessions()
+    // 销毁全部会话，客户端带着旧 session id 再来时自动重建。
+    // （维护期间 create_session 返回 0，session 保持 0，下次请求重试。）
+    if method.starts_with("session_") {
+        let alive = *session != 0
+            && unsafe { api.find_session.expect("find_session")(*session) } != 0;
+        if !alive {
+            *session = unsafe { api.create_session.expect("create_session")() };
+        }
     }
 
     let result = match method.as_str() {
@@ -348,9 +360,9 @@ fn dispatch(line: &str, session: &mut RimeSessionId, api: &'static RimeApi) -> S
         }
         "maintenance_mode" => {
             let on = unsafe { api.is_maintenance_mode.expect("is_maintenance_mode")() };
-            // 自动部署的同步准备阶段 is_maintenance_mode 可能仍为 false，
-            // 合并 AUTO_DEPLOYING 让客户端轮询能准确等到部署真正完成。
-            Ok(json!(on != 0 || AUTO_DEPLOYING.load(Ordering::SeqCst)))
+            // 自动维护的同步准备阶段 is_maintenance_mode 可能仍为 false，
+            // 合并 STARTUP_MAINTENANCE 让客户端轮询能准确等到维护真正完成。
+            Ok(json!(on != 0 || STARTUP_MAINTENANCE.load(Ordering::SeqCst)))
         }
         "schema_list" => schema_list(api).map(|v| json!(v)),
         "session_current_schema" => current_schema(api, *session).map(|v| json!(v)),
@@ -420,9 +432,11 @@ fn handle_connection(stream: UnixStream, api: &'static RimeApi) {
     }
 }
 
-/// 启动时自动部署：build/ 无 .bin 产物则全量，否则增量检测。
-/// 在后台线程运行，不阻塞 socket 服务；客户端连接时部署通常已完成。
-fn auto_deploy(api: &'static RimeApi, config: &Config) {
+/// 启动时自动维护：先部署（build/ 无 .bin 产物则全量，否则增量检测），
+/// 再执行一次用户数据同步。在后台线程运行，不阻塞 socket 服务；
+/// 客户端连接时部署通常已完成，maintenance_mode RPC 在部署与同步全部
+/// 结束前一直保持 true。
+fn auto_maintenance(api: &'static RimeApi, config: &Config) {
     let config = config.clone();
     let build_dir = config.user_data_dir.join("build");
     let has_bins = std::fs::read_dir(&build_dir)
@@ -434,7 +448,7 @@ fn auto_deploy(api: &'static RimeApi, config: &Config) {
         .unwrap_or(false);
     let full = !has_bins;
     log(&config, &format!("auto deploy (full={full})"));
-    AUTO_DEPLOYING.store(true, Ordering::SeqCst);
+    STARTUP_MAINTENANCE.store(true, Ordering::SeqCst);
     thread::spawn(move || {
         // 不在 RIME_LOCK 内：librime 的 deployer 自带后台线程，
         // 设计上允许维护与 session 调用并行（维护期间引擎 disabled）。
@@ -442,8 +456,29 @@ fn auto_deploy(api: &'static RimeApi, config: &Config) {
             api.start_maintenance.expect("start_maintenance")(full as Bool);
             api.join_maintenance_thread.expect("join_maintenance_thread")();
         }
-        AUTO_DEPLOYING.store(false, Ordering::SeqCst);
         log(&config, "auto deploy finished");
+
+        // 启动同步：installation_update → backup_config_files →
+        // user_dict_sync。此时即使有客户端连上，其会话要么尚未创建，
+        // 要么会被内部的 CleanupAllSessions() 销毁后由 dispatch 的
+        // find_session 兜底重建，无需额外处理。
+        unsafe {
+            let ok = api.sync_user_data.expect("sync_user_data")();
+            api.join_maintenance_thread.expect("join_maintenance_thread")();
+            let mut buf = [0 as std::ffi::c_char; 1024];
+            api.get_user_data_sync_dir.expect("get_user_data_sync_dir")(
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            log(
+                &config,
+                &format!(
+                    "startup sync finished (ok={ok}), sync dir: {}",
+                    cstr_to_string(buf.as_ptr())
+                ),
+            );
+        }
+        STARTUP_MAINTENANCE.store(false, Ordering::SeqCst);
     });
 }
 
@@ -491,8 +526,8 @@ fn main() {
 
     log(&config, &format!("ready, listening on {}", config.socket.display()));
 
-    // 后台线程自动部署（首次全量，之后增量检测）
-    auto_deploy(api, &config);
+    // 后台线程自动维护：先部署（首次全量，之后增量检测），再同步用户数据
+    auto_maintenance(api, &config);
 
     // 常驻：除非收到 SIGTERM/SIGINT，否则一直服务。
     let _ = listener.set_nonblocking(true);

@@ -108,7 +108,8 @@ impl Client {
         Ok(v.as_bool().unwrap_or(false))
     }
 
-    /// True while the daemon is deploying (including the startup auto-deploy).
+    /// True while the daemon is busy with startup maintenance (auto deploy +
+    /// user data sync).
     pub fn maintenance_mode(&mut self) -> Result<bool, String> {
         let v = self.request("maintenance_mode", json!({}))?;
         Ok(v.as_bool().unwrap_or(true))

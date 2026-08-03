@@ -10,8 +10,11 @@ librime 引擎服务（`rime-daemon`）+ 一个终端输入客户端（`rime-cli
   LevelDB 用户词典只被一个进程打开，多客户端共享同一份用户数据（词频、用户词）。
 - **Unix socket + JSON-RPC 2.0**：按行分隔（newline-delimited）的 JSON-RPC 协议，
   每个客户端连接对应一个 librime session（例如一个编辑器实例）。
-- **启动自动部署**：后台线程执行 librime 部署——`build/` 目录没有 `.bin` 产物时
-  全量构建，否则增量检测；客户端连接时部署通常已完成，输入前自动等待首次部署。
+- **启动自动维护**：后台线程先执行 librime 部署——`build/` 目录没有 `.bin`
+  产物时全量构建，否则增量检测；部署完成后自动执行一次**用户数据同步**
+  （`sync_user_data`：installation_update → backup_config_files →
+  user_dict_sync，输出到 `sync/<installation_id>/` 目录，可供 git /
+  Syncthing 等跨机同步）。客户端连接时维护通常已完成，输入前自动等待首次维护。
 - **终端客户端 `rime-cli`**：
   - raw 终端模式读取按键，解析 xterm 风格转义序列与 **kitty keyboard protocol**
     （tmux 3.4+ extended-keys / kitty / wezterm），组合键归一化为传统终端字节转发；
@@ -152,7 +155,7 @@ rime-cli [--exec <命令模板>]
 | `ping` | — | 探活，返回 `"pong"` |
 | `maintenance_start` | `{ full: bool }` | 触发部署（全量/增量） |
 | `maintenance_join` | — | 等待部署线程结束 |
-| `maintenance_mode` | — | 是否处于部署中（含启动自动部署的同步准备阶段） |
+| `maintenance_mode` | — | 是否处于维护中（含启动自动部署与同步） |
 | `schema_list` | — | 方案列表 `[{ schema_id, name }]` |
 | `session_current_schema` | — | 当前方案 id |
 | `session_select_schema` | `{ schema_id }` | 切换方案 |

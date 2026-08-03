@@ -123,9 +123,12 @@ pub struct RimeApi {
     pub deploy: FnPtr,
     pub deploy_schema: FnPtr,
     pub deploy_config_file: FnPtr,
-    pub sync_user_data: FnPtr,
+    /// `Bool (*sync_user_data)(void)` — 同步用户数据（installation_update →
+    /// backup_config_files → user_dict_sync 三个维护任务；内部会
+    /// CleanupAllSessions 销毁全部会话，调用方需自行兜底重建）。
+    pub sync_user_data: Option<unsafe extern "C" fn() -> Bool>,
     pub create_session: Option<unsafe extern "C" fn() -> RimeSessionId>,
-    pub find_session: FnPtr,
+    pub find_session: Option<unsafe extern "C" fn(RimeSessionId) -> Bool>,
     pub destroy_session: Option<unsafe extern "C" fn(RimeSessionId) -> Bool>,
     pub cleanup_stale_sessions: FnPtr,
     pub cleanup_all_sessions: FnPtr,
@@ -165,8 +168,10 @@ pub struct RimeApi {
     pub get_shared_data_dir: FnPtr,
     pub get_user_data_dir: FnPtr,
     pub get_sync_dir: FnPtr,
-    pub get_user_id: FnPtr,
-    pub get_user_data_sync_dir: FnPtr,
+    pub get_user_id: Option<unsafe extern "C" fn() -> *const c_char>,
+    /// `void (*get_user_data_sync_dir)(char* dir, size_t buffer_size)` —
+    /// 返回 `<sync_dir>/<installation_id>`，即本机快照所在目录。
+    pub get_user_data_sync_dir: Option<unsafe extern "C" fn(*mut c_char, usize)>,
     pub config_init: FnPtr,
     pub config_load_string: FnPtr,
     pub config_set_bool: FnPtr,
